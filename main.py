@@ -1,3 +1,4 @@
+from datetime import timedelta
 from web3.auto import w3
 from typing import Optional
 from flask_cors import CORS
@@ -5,18 +6,16 @@ from eth_utils import keccak
 from dataclasses import dataclass
 from rlp.sedes import Binary, big_endian_int, binary
 from eth_account.messages import encode_defunct
-import requests, time, json, threading, flask, rlp
-
-
+import requests, time, json, threading, flask, rlp, sys
+import groestlcoin_hash, skein
+from termcolor import colored
 global config
 
 transactions = {}
 try:
-    configFile = open("config.json", "r")
-    config = json.load(configFile)
-    configFile.close()
+    config = {"dataBaseFile": "database.json", "peers": [], "InitTxID": "none"}
 except:
-    config = {"dataBaseFile": "database.json", "peers": ["https://node-1.siricoin.tech:5006/", "https://node-2.siricoin.tech:5006/"], "InitTxID": "none"}
+    config = {"dataBaseFile": "database.json", "peers": [], "InitTxID": "none"}
 
 try:
     ssl_context = tuple(config["ssl"])
@@ -153,8 +152,8 @@ class GenesisBeacon(object):
 
     def proofOfWork(self):
         bRoot = self.beaconRoot()
-        proof = w3.soliditySha3(["bytes32", "uint256"], [bRoot, int(self.nonce)])
-        return proof.hex()
+        b = (b"".join([bytes.fromhex(bRoot.replace("0x", "")),int(self.nonce).to_bytes(32, 'big')]))
+        return "0x" + groestlcoin_hash.getHash(b"".join([skein.skein256(b).digest(), self.nonce.to_bytes(32, "big")]), 64).hex()
 
     def difficultyMatched(self):
         return int(self.proofOfWork(), 16) < self.miningTarget
@@ -197,13 +196,11 @@ class Beacon(object):
 
     def proofOfWork(self):
         bRoot = self.beaconRoot()
-#        print(f"Beacon root : {bRoot}")
-        proof = w3.soliditySha3(["bytes32", "uint256"], [bRoot, int(self.nonce)])
-        return proof.hex()
+        b = (b"".join([bytes.fromhex(bRoot.replace("0x", "")),int(self.nonce).to_bytes(32, 'big')]))
+        return "0x" + groestlcoin_hash.getHash(b"".join([skein.skein256(b).digest(), self.nonce.to_bytes(32, "big")]), 64).hex()
 
     def difficultyMatched(self):
-#        print(self.proofOfWork())
-#        print(self.miningTarget)
+
         return int(self.proofOfWork(), 16) < int(self.miningTarget, 16)
 
     def exportJson(self):
@@ -216,8 +213,8 @@ class BeaconChain(object):
         self.blocks = [GenesisBeacon()]
         self.blocksByHash = {self.blocks[0].proof: self.blocks[0]}
         self.pendingMessages = []
-        self.blockReward = 50
-        self.blockTime = 1200 # in seconds, about 20 minutes
+        self.blockReward = 12.5
+        self.blockTime = 300 # in seconds, about 20 minutes
         self.cummulatedDifficulty = 1
 
     def checkBeaconMessages(self, beacon):
@@ -228,7 +225,18 @@ class BeaconChain(object):
         return True
 
     def calcDifficulty(self, expectedDelay, timestamp1, timestamp2, currentDiff):
-        return min(max((currentDiff * expectedDelay)/max((timestamp2 - timestamp1), 1), currentDiff * 0.9, 1), currentDiff*1.1)
+
+        # try:
+        #     AnchorBlock = 11
+        #     if len(node.state.beaconChain.blocks) > AnchorBlock:
+        #         parentAnchorBlockTimestamp = node.state.beaconChain.getBlockByHeightJSON(int(AnchorBlock-1))["timestamp"]
+        #         time_delta = timestamp2 - parentAnchorBlockTimestamp                                                       BROKE ASERT ALGO
+        #         height_delta = len(node.state.beaconChain.blocks) - AnchorBlock
+        #         diff = abs(time_delta - expectedDelay * (height_delta + 1))
+        #         return diff
+        # except:
+            return (min(max((currentDiff * expectedDelay)/max((timestamp2 - timestamp1), 1), currentDiff * 0.9, 1), currentDiff*1.1))
+
 
     def isBeaconValid(self, beacon):
         _lastBeacon = self.getLastBeacon()
@@ -303,7 +311,7 @@ class BeaconChain(object):
 
 class State(object):
     def __init__(self, initTxID):
-        self.balances = {"0x611B74e0dFA8085a54e8707c573A588138c9dDba": 10, "0x3f119Cef08480751c47a6f59Af1AD2f90b319d44": 100, "0x0000000000000000000000000000000000000000": 0}
+        self.balances = {"0xc79878fCD826EC7e00c9cB754f8242F3466dead5": 100, "0x0000000000000000000000000000000000000000": 0}
         self.transactions = {"0x0000000000000000000000000000000000000000": []}
         self.received = {"0x0000000000000000000000000000000000000000": []}
         self.sent = {"0x0000000000000000000000000000000000000000": []}
@@ -315,8 +323,8 @@ class State(object):
         self.txIndex = {}
         self.lastTxIndex = 0
         self.beaconChain = BeaconChain()
-        self.holders = ["0x3f119Cef08480751c47a6f59Af1AD2f90b319d44", "0x611B74e0dFA8085a54e8707c573A588138c9dDba", "0x0000000000000000000000000000000000000000"]
-        self.totalSupply = 110 # initial supply used for testing
+        self.holders = ["0xc79878fCD826EC7e00c9cB754f8242F3466dead5", "0x0000000000000000000000000000000000000000"]
+        self.totalSupply = 100 # initial supply used for testing
         self.type2ToType0Hash = {}
         self.type0ToType2Hash = {}
 
@@ -996,4 +1004,4 @@ def handleWeb3Request():
 
 if __name__ == "__main__":
     print(ssl_context or "No SSL context defined")
-    app.run(host="0.0.0.0", port=5005, ssl_context=ssl_context)
+    app.run(host="0.0.0.0", port=5006, ssl_context=ssl_context)
